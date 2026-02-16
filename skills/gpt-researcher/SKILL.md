@@ -20,25 +20,42 @@ This ensures clean, token-efficient output suitable for LLM context.
 
 ## When to Use Research Tools
 
-| Need | Tool | Speed | Context Impact |
-|------|------|-------|----------------|
-| Quick fact/lookup | `gpt-researcher_quick_search` | ~3-5 seconds | Minimal - call directly |
-| Comprehensive research | `gpt-researcher_deep_research` | ~1-3 minutes | Isolated - delegate to sub-agent |
-| Full report | `gpt-researcher_write_report` | ~30 seconds | Uses existing research_id |
+| Need | Tool | Approach |
+|------|------|----------|
+| Quick fact/lookup | `quick_search` | **Direct tool call** |
+| ANY research | `deep_research` | **Sub-agent delegation** |
+| Report from research | `write_report` | Direct tool call (uses research_id) |
 
 ### Decision Flow
 
 ```
 Is this a simple lookup (single fact, definition, current value)?
-  → YES: Use quick_search directly (fast, minimal context)
-  → NO: Is this a complex topic requiring multiple sources?
-         → YES: Delegate to researcher sub-agent (context isolated)
-         → NO: Use quick_search with 5-10 results
+  → YES: Call quick_search directly
+  → NO: Delegate to researcher sub-agent
+
+NEVER call deep_research directly - always use sub-agent to protect context.
 ```
+
+### Why Always Use Sub-Agent for Research
+
+**Direct `deep_research` call:**
+- Returns 10k-50k+ tokens of raw context
+- Pollutes your context window
+- Wastes tokens on scraped web content
+
+**Sub-agent delegation:**
+- Returns synthesized summary (1k-3k tokens)
+- Raw context stays in sub-agent
+- Main context stays clean
+- Sub-agent can iterate and refine
+
+**Exception:** Only call `deep_research` directly if you explicitly need the raw research context for further processing in your session.
 
 ---
 
 ## Quick Search
+
+**ALWAYS call directly** - lightweight, minimal context impact.
 
 Use for: Single facts, definitions, current prices, simple lookups
 
@@ -60,23 +77,11 @@ result = gpt_researcher_quick_search(query="current Bitcoin price")
 
 ## Deep Research
 
-Use for: Comprehensive topics, multi-faceted questions, technical deep-dives
+**ALWAYS delegate to sub-agent** - protects your context window.
 
-### Option 1: Direct Tool Call (adds context to current session)
+Use for: ANY topic requiring more than a simple lookup
 
-```python
-result = gpt_researcher_deep_research(
-    query="Compare GLM-5 providers in USA with privacy compliance"
-)
-# Use result["context"] directly - cleaned of HTML
-```
-
-### Option 2: Sub-Agent Delegation (isolated context)
-
-Use when:
-- Research will generate large context
-- You want to protect main context window
-- Research is autonomous and comprehensive
+### Sub-Agent Delegation (DEFAULT)
 
 ```
 Task tool with subagent_type: "researcher"
@@ -86,7 +91,29 @@ The sub-agent:
 1. Calls deep_research internally
 2. Processes and synthesizes findings 
 3. Returns final markdown report
-4. Main agent context stays clean
+4. Main agent context stays clean (~1-3k tokens vs 50k+ raw)
+
+**Example prompt for sub-agent:**
+```
+Research GLM-5 hosting providers in the USA.
+Focus on: pricing, privacy compliance, and context window support.
+Return a comparison table with your top 5 recommendations.
+```
+
+### Direct Tool Call (EXCEPTION - use sparingly)
+
+Only call `gpt_researcher_deep_research` directly when:
+- You need raw context for further processing
+- You plan to use `write_report` in the same session
+- You explicitly want the full scraped content
+
+```python
+# Direct call - only for special cases
+result = gpt_researcher_deep_research(
+    query="Compare GLM-5 providers in USA with privacy compliance"
+)
+# result["context"] contains 10k-50k+ tokens of raw content
+```
 
 ---
 
@@ -122,9 +149,17 @@ report = gpt_researcher_write_report(
 ### Context Management
 
 1. **Quick lookups** → Call `quick_search` directly
-2. **Medium research** → Call `deep_research` directly, use returned context
-3. **Large research** → Delegate to `Task(subagent_type="researcher")`
-4. **Reports** → Use `write_report` after deep_research
+2. **Any research** → Delegate to `Task(subagent_type="researcher")`
+3. **Need raw context?** → Call `deep_research` directly (exception)
+4. **Reports** → Use `write_report` after direct `deep_research`
+
+### Token Comparison
+
+| Approach | Context Impact | When to Use |
+|----------|----------------|-------------|
+| `quick_search` direct | ~500 tokens | Simple facts |
+| `deep_research` direct | 10k-50k tokens | Need raw context |
+| Sub-agent + researcher | 1k-3k tokens | Default for all research |
 
 ### Multi-Step Research
 
@@ -166,11 +201,19 @@ User: "Find the best GLM-5 providers in USA with zero data retention"
 
 Agent:
 1. quick_search("GLM-5 providers USA zero data retention")
-   → Gets overview of providers
+   → Gets quick overview of providers
    
-2. deep_research("GLM-5 hosting providers USA comparison privacy compliance pricing")
-   → Detailed research with sources
-   
-3. write_report(research_id, "Compare pricing, privacy, and performance")
-   → Structured markdown report
+2. Task(subagent_type="researcher", prompt="Research GLM-5 hosting providers in USA.
+   Compare pricing, privacy compliance (ZDR, no-training), and features.
+   Return top 5 recommendations in a comparison table.")
+   → Sub-agent handles all research internally
+   → Returns clean summary (not 50k tokens of raw context)
 ```
+
+## Red Flags
+
+| ❌ Don't Do This | ✅ Do This Instead |
+|------------------|-------------------|
+| Call `deep_research` directly for general research | Delegate to researcher sub-agent |
+| Accept 50k tokens of raw scraped content | Get 1-3k token synthesized summary |
+| Wonder why your context is full | Use sub-agent isolation |
