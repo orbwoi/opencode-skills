@@ -118,7 +118,8 @@ class SetupConfig:
                         "RETRIEVER": "duckduckgo",
                         "SMART_LLM": "ollama:kimi-k2.5:cloud"
                     },
-                    "type": "local"
+                    "type": "local",
+                    "timeout": 300000
                 }
             }
         }
