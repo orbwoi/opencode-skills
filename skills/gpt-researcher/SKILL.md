@@ -3,201 +3,195 @@ name: gpt-researcher
 description: Research skill for AI agents. Use this skill when you need to conduct web searches or deep research. Provides access to MCP tools for quick searches and deep research with automatic HTML-to-Markdown conversion. All outputs are clean Markdown-formatted text suitable for LLM consumption.
 ---
 
-# GPT Researcher Agent Skill
+# GPT Researcher Skill
 
-This skill provides instructions for using research MCP tools to gather information from the web with clean Markdown output.
+## CRITICAL: Know Your Role
 
-## Output Format
+**You may be in one of two contexts:**
 
-**ALL research output is Markdown only.** HTML tags and entities are automatically converted to Markdown from:
-- Search result snippets
-- Research context
-- Scraped web content
+| Context | How You Got Here | Your Role | What To Do |
+|---------|------------------|-----------|------------|
+| **Main Agent** | User asked you a question requiring research | Coordinator | Delegate to researcher sub-agent via Task tool |
+| **Researcher Sub-Agent** | You were spawned by Task tool with `subagent_type: "researcher"` | Researcher | Call MCP tools directly, synthesize results, return summary |
 
-This ensures clean, token-efficient output suitable for LLM context.
-
----
-
-## When to Use Research Tools
-
-| Need | Tool | Approach |
-|------|------|----------|
-| Quick fact/lookup | `quick_search` | **Direct tool call** |
-| ANY research | `deep_research` | **Sub-agent delegation** |
-
-### Decision Flow
-
-```
-Is this a simple lookup (single fact, definition, current value)?
-  → YES: Call quick_search directly
-  → NO: Delegate to researcher sub-agent
-
-NEVER call deep_research directly - always use sub-agent to protect context.
-```
-
-### Why Always Use Sub-Agent for Research
-
-**Direct `deep_research` call:**
-- Returns 10k-50k+ tokens of raw context
-- Pollutes your context window
-- Wastes tokens on scraped web content
-
-**Sub-agent delegation:**
-- Returns synthesized summary (1k-3k tokens)
-- Raw context stays in sub-agent
-- Main context stays clean
-- Sub-agent can iterate and refine
-
-**Exception:** Only call `deep_research` directly if you explicitly need the raw research context for further processing in your session.
+**If you ARE the researcher sub-agent:**
+- DO NOT delegate further - YOU are the researcher
+- DO NOT use webfetch - USE THE MCP TOOLS provided
+- Call `gpt_researcher_quick_search` or `gpt-researcher_deep_research` directly
+- Synthesize findings and return a clean summary to the main agent
 
 ---
 
-## Quick Search
+## Tool Reference
 
-**ALWAYS call directly** - lightweight, minimal context impact.
+### MCP Tools Available
 
-Use for: Single facts, definitions, current prices, simple lookups
+| Tool | Use Case | When to Use |
+|------|----------|-------------|
+| `gpt-researcher_quick_search` | Fast web search | Simple facts, current values, quick lookups |
+| `gpt-researcher_deep_research` | Comprehensive research | Any topic needing multiple sources, analysis, synthesis |
 
-```python
-# Direct tool call - fast and lightweight
-result = gpt_researcher_quick_search(query="current Bitcoin price")
-```
+### DO NOT Use These (for initial research)
 
-**Returns:**
-- `search_results`: List of {title, href, body} - HTML cleaned
-- `result_count`: Number of results
+| Tool | Why Not |
+|------|---------|
+| `webfetch` | For initial searches - use MCP tools instead |
 
-**Best practices:**
-- Specific queries get better results
-- Use for time-sensitive information
-- Perfect for verifying facts or getting snippets
+### When webfetch IS Appropriate
+
+| Scenario | Example |
+|----------|---------|
+| Fetching a specific URL from search results | "Get more details from https://deepinfra.com/pricing found in the search" |
+| Checking a known page | "Check the docs at https://docs.example.com/api" |
+| Following up on a specific link | "Read the full article at [URL from previous search]" |
+
+**Rule of thumb:**
+- Need to FIND information → Use MCP tools (`quick_search`, `deep_research`)
+- Have a specific URL to read → `webfetch` is fine
 
 ---
 
-## Deep Research
+## For Main Agent: When to Delegate
 
-**ALWAYS delegate to sub-agent** - protects your context window.
-
-Use for: ANY topic requiring more than a simple lookup
-
-### Sub-Agent Delegation (DEFAULT)
+**From the main agent context, delegate research to the researcher sub-agent:**
 
 ```
-Task tool with subagent_type: "researcher"
-```
-
-The sub-agent:
-1. Calls deep_research internally
-2. Processes and synthesizes findings 
-3. Returns final markdown report
-4. Main agent context stays clean (~1k-3k tokens vs 50k+ raw)
-
-**Example prompt for sub-agent:**
-```
-Research GLM-5 hosting providers in the USA.
-Focus on: pricing, privacy compliance, and context window support.
-Return a comparison table with your top 5 recommendations.
-```
-
-### Direct Tool Call (EXCEPTION - use sparingly)
-
-Only call `gpt_researcher_deep_research` directly when:
-- You need raw context for further processing
-- You explicitly want the full scraped content
-- You will synthesize the report yourself
-
-```python
-# Direct call - only for special cases
-result = gpt_researcher_deep_research(
-    query="Compare GLM-5 providers in USA with privacy compliance"
+Task(
+  subagent_type: "researcher",
+  prompt: "Research [topic]. Focus on [specific aspects]. Return [desired format]."
 )
-# result["context"] contains 10k-50k+ tokens of raw content
-# Synthesize the report yourself from result["context"]
+```
+
+**Example:**
+```
+Task(
+  subagent_type: "researcher",
+  prompt: "Research GLM-5 hosting providers in USA. Compare pricing, privacy compliance, and context window support. Return a comparison table with top 5 recommendations."
+)
 ```
 
 ---
 
-## Synthesizing Reports
+## For Researcher Sub-Agent: How to Research
 
-**Agents should synthesize reports themselves** from the context returned by deep_research. This is more efficient than having the MCP server make a second LLM call.
+**You are the researcher. Do the work yourself. Do NOT delegate.**
 
-```python
-# Get raw context
-result = gpt_researcher_deep_research(query="...")
+### Step 1: Choose Your Tool
 
-# Synthesize yourself (agent does this, not MCP server)
-# Use result["context"] to create your report
+| Need | Tool |
+|------|------|
+| Quick fact (single value, definition, current price) | `gpt-researcher_quick_search` |
+| Any research (multi-faceted, comparison, analysis) | `gpt-researcher_deep_research` |
+
+### Step 2: Call the Tool Directly
+
+**Quick search example:**
+```
+gpt-researcher_quick_search(query="GLM-5 API providers USA 2026")
+```
+
+**Deep research example:**
+```
+gpt-researcher_deep_research(query="Compare GLM-5 hosting providers in USA with focus on pricing, privacy compliance (ZDR, no-training policies), and context window sizes")
+```
+
+### Step 3: Synthesize and Return
+
+After getting results:
+1. Read the returned context
+2. Synthesize the key findings
+3. Return a clean summary (1k-3k tokens) to the main agent
+4. Do NOT return 50k tokens of raw context
+
+**Your response should be structured like:**
+```markdown
+## Summary
+[Brief overview]
+
+## Key Findings
+- Finding 1
+- Finding 2
+- Finding 3
+
+## Details
+[Relevant details organized by topic]
+
+## Sources
+- URL 1
+- URL 2
 ```
 
 ---
 
-## Research Best Practices
+## Query Best Practices
 
-### Query Formulation
+### Good Queries
 
-| Good Query | Bad Query |
-|------------|-----------|
-| "GLM-5 hosting providers USA with zero data retention" | "tell me about AI" |
-| "Cloudflare Markdown for Agents feature February 2026" | "what's new" |
-| "compare DeepInfra vs Fireworks pricing for GLM-5" | "cheap AI" |
+| Query | Why It Works |
+|-------|--------------|
+| "GLM-5 hosting providers USA with zero data retention 2026" | Specific, scoped, time-referenced |
+| "Cloudflare Workers AI pricing per million tokens February 2026" | Exact metric, time-sensitive |
+| "compare DeepInfra vs Fireworks vs Together AI for GLM-4" | Comparison, specific models |
 
-### Context Management
+### Bad Queries
 
-1. **Quick lookups** → Call `quick_search` directly
-2. **Any research** → Delegate to `Task(subagent_type="researcher")`
-3. **Need raw context?** → Call `deep_research` directly (exception)
-
-### Token Comparison
-
-| Approach | Context Impact | When to Use |
-|----------|----------------|-------------|
-| `quick_search` direct | ~500 tokens | Simple facts |
-| `deep_research` direct | 10k-50k tokens | Need raw context |
-| Sub-agent + researcher | 1k-3k tokens | Default for all research |
+| Query | Why It Fails |
+|-------|--------------|
+| "tell me about AI" | Too broad |
+| "what's new" | No scope, no specificity |
+| "cheap AI" | No context, no comparison |
 
 ---
 
-## Available Tools
+## Token Expectations
 
-| Tool | Purpose | Output |
-|------|---------|--------|
-| `gpt_researcher_quick_search` | Fast web search | Cleaned search snippets |
-| `gpt_researcher_deep_research` | Comprehensive research | Cleaned context + research_id |
-| `gpt_researcher_get_research_sources` | Get source URLs | URL list |
-| `gpt_researcher_get_research_context` | Retrieve stored context | Cleaned context |
-
----
-
-## Privacy & Data Handling
-
-When researching privacy-sensitive topics, ask for:
-- Zero Data Retention (ZDR) policies
-- No-training-on-user-data policies  
-- Data residency requirements
-- Compliance certifications (SOC 2, ISO 27001, HIPAA)
+| Tool | Input Tokens | Output Tokens | Total Context Impact |
+|------|--------------|---------------|----------------------|
+| `quick_search` | ~100 | ~500 | Low (~600) |
+| `deep_research` | ~200 | 10k-50k | High (must synthesize) |
+| Synthesized report | - | 1k-3k | What you should return |
 
 ---
 
-## Example Usage Session
+## Example: Researcher Sub-Agent Session
 
+**You receive this prompt:**
+> "Research GLM-5 providers in USA with privacy compliance. Return top 5 with pricing."
+
+**You ARE the researcher. You do this:**
+
+1. Call `gpt-researcher_deep_research(query="GLM-5 API hosting providers USA privacy compliance zero data retention pricing comparison")`
+
+2. Read the returned context (10k-50k tokens)
+
+3. Synthesize into a clean summary:
+
+```markdown
+## Top 5 GLM-5 Providers in USA (Privacy-Focused)
+
+| Provider | Price/1M Tokens | ZDR | No-Training | Notes |
+|----------|-----------------|-----|-------------|-------|
+| DeepInfra | $0.14 | ✅ | ✅ | Best value |
+| Together AI | $0.20 | ✅ | ✅ | Enterprise support |
+| ...
+
+## Recommendation
+DeepInfra offers the best value for GLM-5 with strong privacy guarantees...
+
+## Sources
+- https://deepinfra.com/pricing
+- https://together.ai/privacy
 ```
-User: "Find the best GLM-5 providers in USA with zero data retention"
 
-Agent:
-1. quick_search("GLM-5 providers USA zero data retention")
-   → Gets quick overview of providers
-   
-2. Task(subagent_type="researcher", prompt="Research GLM-5 hosting providers in USA.
-   Compare pricing, privacy compliance (ZDR, no-training), and features.
-   Return top 5 recommendations in a comparison table.")
-   → Sub-agent handles all research internally
-   → Returns clean summary (not 50k tokens of raw context)
-```
+4. Return ONLY the synthesized summary (not the raw context)
+
+---
 
 ## Red Flags
 
-| ❌ Don't Do This | ✅ Do This Instead |
-|------------------|-------------------|
-| Call `deep_research` directly for general research | Delegate to researcher sub-agent |
-| Accept 50k tokens of raw scraped content | Get 1-3k token synthesized summary |
-| Wonder why your context is full | Use sub-agent isolation |
+| ❌ Wrong Approach | ✅ Correct Approach |
+|-------------------|---------------------|
+| "I'll use webfetch to get the data" | Use `gpt-researcher_quick_search` or `gpt-researcher_deep_research` |
+| "Let me delegate to a researcher sub-agent" (when YOU are the researcher) | Do the research yourself with MCP tools |
+| Returning 50k tokens of raw context | Synthesize and return 1k-3k token summary |
+| Using old URLs from training data | MCP tools do LIVE web searches |
