@@ -9,7 +9,7 @@ This skill provides instructions for using research MCP tools to gather informat
 
 ## Output Format
 
-**ALL research output is Markdown only.** HTML tags and entities are automatically stripped from:
+**ALL research output is Markdown only.** HTML tags and entities are automatically converted to Markdown from:
 - Search result snippets
 - Research context
 - Scraped web content
@@ -24,7 +24,6 @@ This ensures clean, token-efficient output suitable for LLM context.
 |------|------|----------|
 | Quick fact/lookup | `quick_search` | **Direct tool call** |
 | ANY research | `deep_research` | **Sub-agent delegation** |
-| Report from research | `write_report` | Direct tool call (uses research_id) |
 
 ### Decision Flow
 
@@ -91,7 +90,7 @@ The sub-agent:
 1. Calls deep_research internally
 2. Processes and synthesizes findings 
 3. Returns final markdown report
-4. Main agent context stays clean (~1-3k tokens vs 50k+ raw)
+4. Main agent context stays clean (~1k-3k tokens vs 50k+ raw)
 
 **Example prompt for sub-agent:**
 ```
@@ -104,8 +103,8 @@ Return a comparison table with your top 5 recommendations.
 
 Only call `gpt_researcher_deep_research` directly when:
 - You need raw context for further processing
-- You plan to use `write_report` in the same session
 - You explicitly want the full scraped content
+- You will synthesize the report yourself
 
 ```python
 # Direct call - only for special cases
@@ -113,26 +112,22 @@ result = gpt_researcher_deep_research(
     query="Compare GLM-5 providers in USA with privacy compliance"
 )
 # result["context"] contains 10k-50k+ tokens of raw content
+# Synthesize the report yourself from result["context"]
 ```
 
 ---
 
-## Writing Reports
+## Synthesizing Reports
 
-After deep research, generate a structured report:
+**Agents should synthesize reports themselves** from the context returned by deep_research. This is more efficient than having the MCP server make a second LLM call.
 
 ```python
-# First conduct research
-research = gpt_researcher_deep_research(query="...")
+# Get raw context
+result = gpt_researcher_deep_research(query="...")
 
-# Then write report using the research_id
-report = gpt_researcher_write_report(
-    research_id=research["research_id"],
-    custom_prompt="Focus on pricing and privacy features"
-)
+# Synthesize yourself (agent does this, not MCP server)
+# Use result["context"] to create your report
 ```
-
-**Report is always Markdown formatted.**
 
 ---
 
@@ -151,7 +146,6 @@ report = gpt_researcher_write_report(
 1. **Quick lookups** → Call `quick_search` directly
 2. **Any research** → Delegate to `Task(subagent_type="researcher")`
 3. **Need raw context?** → Call `deep_research` directly (exception)
-4. **Reports** → Use `write_report` after direct `deep_research`
 
 ### Token Comparison
 
@@ -161,15 +155,6 @@ report = gpt_researcher_write_report(
 | `deep_research` direct | 10k-50k tokens | Need raw context |
 | Sub-agent + researcher | 1k-3k tokens | Default for all research |
 
-### Multi-Step Research
-
-For complex research requiring multiple angles:
-
-1. Start with `quick_search` for overview
-2. Use `deep_research` for detailed analysis
-3. Call `write_report` for final synthesis
-4. Use `get_research_sources` for citations if needed
-
 ---
 
 ## Available Tools
@@ -178,7 +163,6 @@ For complex research requiring multiple angles:
 |------|---------|--------|
 | `gpt_researcher_quick_search` | Fast web search | Cleaned search snippets |
 | `gpt_researcher_deep_research` | Comprehensive research | Cleaned context + research_id |
-| `gpt_researcher_write_report` | Generate report | Markdown report |
 | `gpt_researcher_get_research_sources` | Get source URLs | URL list |
 | `gpt_researcher_get_research_context` | Retrieve stored context | Cleaned context |
 
